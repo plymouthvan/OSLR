@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openstylelab"
+version = "0.1.0"
+description = "OpenStyleLab (OSL): Local AI tool that learns a photographer's editing style from Lightroom catalogs and applies it."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-only" }
+authors = [
+  { name = "OpenStyleLab Contributors" }
+]
+keywords = ["lightroom", "xmp", "photography", "machine-learning", "pytorch", "libraw"]
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Operating System :: OS Independent"
+]
+
+dependencies = [
+  "click>=8.1",
+  "rich>=13.7",
+  "pydantic>=2.7",
+  "pandas>=2.2",
+  "sqlalchemy>=2.0",
+  "lxml>=5.2",
+  "rawpy>=0.21",
+  "pillow>=10.3",
+  "numpy>=1.26"
+]
+
+[project.optional-dependencies]
+train = [
+  "torch>=2.3",
+  "torchvision>=0.18",
+  "tqdm>=4.66",
+  "scikit-learn>=1.5"
+]
+
+[project.scripts]
+osl = "osl.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
