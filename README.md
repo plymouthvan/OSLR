@@ -1,6 +1,6 @@
-# OpenStyleLab (OSL)
+# OpenStyleLightRoom (OSLR)
 
-OpenStyleLab (OSL) is a local, open-source AI tool that learns a photographer’s personal editing style from Lightroom catalogs and applies it automatically to new catalogs. The core workflow is CLI-first: start with a Lightroom catalog (`.lrcat`) and produce a new catalog (`.lrcat`) with predicted edits applied.
+OpenStyleLightRoom (OSLR) is a local, open-source AI tool that learns a photographer’s personal editing style from Lightroom catalogs and applies it automatically to new catalogs. The core workflow is CLI-first: start with a Lightroom catalog (`.lrcat`) and produce a new catalog (`.lrcat`) with predicted edits applied.
 
 Target parity: ImagenAI / Aftershoot style transfer — fully local, no SaaS, no artificial pricing.
 
@@ -21,7 +21,7 @@ Requirements:
 - macOS or Windows (Linux for training is supported; Lightroom integration requires macOS/Windows)
 - Optional GPU for training (PyTorch with CUDA or Apple Silicon MPS)
 
-Because of PEP 668, macOS Python installs are often externally-managed. Create a virtual environment and install OSL editable.
+Because of PEP 668, macOS Python installs are often externally-managed. Create a virtual environment and install OSLR editable.
 
 ```
 python3 -m venv .venv
@@ -51,7 +51,7 @@ osl --help
 
 ### Step 1: Ingest a Lightroom catalog
 
-**Prerequisite:** In Lightroom, enable `Catalog Settings → Metadata → Automatically write changes into XMP`. This ensures your edits are saved as sidecar `.xmp` files next to your RAWs, which OSL needs for ground truth.
+**Prerequisite:** In Lightroom, enable `Catalog Settings → Metadata → Automatically write changes into XMP`. This ensures your edits are saved as sidecar `.xmp` files next to your RAWs, which OSLR needs for ground truth.
 
 **Command:**
 ```
