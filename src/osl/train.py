@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import os
+from contextlib import nullcontext
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -226,7 +228,7 @@ class TrainConfig:
     epochs: int = 30
     lr: float = 3e-4
     weight_decay: float = 1e-4
-    workers: int = 4
+    workers: int = 8
     val_frac: float = 0.1
     seed: int = 1337
     huber_delta: float = 1.0
@@ -280,6 +282,11 @@ def train_one_epoch(
     if cfg.reg_weights is not None:
         reg_w = torch.tensor(cfg.reg_weights, dtype=torch.float32, device=device)
 
+    # Enable mixed precision on MPS (and CUDA). Keep master weights in fp32.
+    amp_enabled = device.type in ("mps", "cuda")
+    amp_dtype = torch.float16 if device.type in ("mps", "cuda") else torch.bfloat16
+    autocast_ctx = torch.autocast(device_type=device.type, dtype=amp_dtype) if amp_enabled else nullcontext()
+
     tot_loss = 0.0
     tot_reg_mae = 0.0
     tot_cls_acc = 0.0
@@ -292,29 +299,34 @@ def train_one_epoch(
         y_cls = batch["y_cls"].to(device, non_blocking=True)  # {-1,+1}
 
         opt.zero_grad(set_to_none=True)
-        pred_reg, pred_cls = model(x)
 
-        loss = 0.0
-        if pred_reg is not None:
-            l_reg = loss_reg_fn(pred_reg, y_reg)
-            if reg_w is not None:
-                # weight per-dimension MAE approx by scaling loss — for Huber use per-dim weighting
-                l_reg = (F.huber_loss(pred_reg, y_reg, delta=cfg.huber_delta, reduction="none")).mean(0)
-                l_reg = (l_reg * reg_w).mean()
-            loss = loss + l_reg
-            tot_reg_mae += mae(pred_reg.detach(), y_reg).item()
-        if pred_cls is not None and pred_cls.numel() > 0:
-            # Convert targets from {-1,+1} to {0,1}
-            y01 = (y_cls + 1.0) * 0.5
-            l_cls = loss_cls_fn(pred_cls, y01)
-            loss = loss + l_cls
-            tot_cls_acc += bce_logits_accuracy(pred_cls.detach(), y_cls).item()
+        with autocast_ctx:
+            pred_reg, pred_cls = model(x)
+
+            loss = 0.0
+            if pred_reg is not None:
+                l_reg = loss_reg_fn(pred_reg, y_reg)
+                if reg_w is not None:
+                    # weight per-dimension MAE approx by scaling loss — for Huber use per-dim weighting
+                    l_reg = (F.huber_loss(pred_reg, y_reg, delta=cfg.huber_delta, reduction="none")).mean(0)
+                    l_reg = (l_reg * reg_w).mean()
+                loss = loss + l_reg
+            if pred_cls is not None and pred_cls.numel() > 0:
+                # Convert targets from {-1,+1} to {0,1}
+                y01 = (y_cls + 1.0) * 0.5
+                l_cls = loss_cls_fn(pred_cls, y01)
+                loss = loss + l_cls
 
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         opt.step()
         if sched is not None:
             sched.step()
+
+        if pred_reg is not None:
+            tot_reg_mae += mae(pred_reg.detach(), y_reg).item()
+        if pred_cls is not None and pred_cls.numel() > 0:
+            tot_cls_acc += bce_logits_accuracy(pred_cls.detach(), y_cls).item()
 
         tot_loss += loss.item()
         count += 1
@@ -339,12 +351,19 @@ def validate(
     tot_reg_mae = 0.0
     tot_cls_acc = 0.0
     count = 0
+
+    # Match training autocast behavior for eval
+    amp_enabled = device.type in ("mps", "cuda")
+    amp_dtype = torch.float16 if device.type in ("mps", "cuda") else torch.bfloat16
+    autocast_ctx = torch.autocast(device_type=device.type, dtype=amp_dtype) if amp_enabled else nullcontext()
+
     for batch in loader:
         x = batch["image"].to(device, non_blocking=True)
         y_reg = batch["y_reg"].to(device, non_blocking=True)
         y_cls = batch["y_cls"].to(device, non_blocking=True)
 
-        pred_reg, pred_cls = model(x)
+        with autocast_ctx:
+            pred_reg, pred_cls = model(x)
         if pred_reg is not None:
             tot_reg_mae += mae(pred_reg, y_reg).item()
         if pred_cls is not None and pred_cls.numel() > 0:
@@ -364,29 +383,48 @@ def build_loaders(
     workers: int,
     val_frac: float,
     seed: int,
+    device: torch.device,
 ) -> Tuple[DataLoader, Optional[DataLoader]]:
     items = load_manifest(corpus_dir)
     train_items, val_items = split_items(items, val_frac=val_frac, seed=seed)
     ds_train = CorpusDataset(corpus_dir, train_items, img_size=img_size)
-    dl_train = DataLoader(
-        ds_train,
+
+    # MPS guidance:
+    # - pin_memory: False on MPS/CPU, True on CUDA
+    # - workers: recommend 8–12 on Apple Silicon
+    # - persistent_workers=True and prefetch_factor=4 when workers > 0
+    pin_memory = device.type == "cuda"
+
+    dl_train_kwargs = dict(
         batch_size=batch_size,
         shuffle=True,
         num_workers=workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
         drop_last=True if len(ds_train) >= batch_size else False,
     )
+    if workers > 0:
+        dl_train_kwargs.update(
+            persistent_workers=True,
+            prefetch_factor=4,
+        )
+    dl_train = DataLoader(ds_train, **dl_train_kwargs)
+
     dl_val = None
     if val_items:
         ds_val = CorpusDataset(corpus_dir, val_items, img_size=img_size)
-        dl_val = DataLoader(
-            ds_val,
+        dl_val_kwargs = dict(
             batch_size=batch_size,
             shuffle=False,
             num_workers=workers,
-            pin_memory=True,
+            pin_memory=pin_memory,
             drop_last=False,
         )
+        if workers > 0:
+            dl_val_kwargs.update(
+                persistent_workers=True,
+                prefetch_factor=4,
+            )
+        dl_val = DataLoader(ds_val, **dl_val_kwargs)
     return dl_train, dl_val
 
 
@@ -462,7 +500,21 @@ def run(
         warmup_epochs=warmup_epochs,
     )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Prefer Apple Silicon MPS when available; otherwise CUDA → CPU
+    mps_built = False
+    mps_avail = False
+    if hasattr(torch.backends, "mps"):
+        mps_built = torch.backends.mps.is_built()
+        mps_avail = torch.backends.mps.is_available()
+    if mps_built and mps_avail:
+        # Enable explicit CPU fallbacks logging for unsupported ops on MPS
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    print(f"[OSL] Device: {device.type}; MPS built={mps_built}, available={mps_avail}")
     set_seed(cfg.seed)
 
     # Data
@@ -473,6 +525,7 @@ def run(
         workers=cfg.workers,
         val_frac=cfg.val_frac,
         seed=cfg.seed,
+        device=device,
     )
 
     # Model

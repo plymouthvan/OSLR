@@ -59,7 +59,7 @@ def ingest_cmd(catalog_path: pathlib.Path, out_dir: pathlib.Path, max_dim: int, 
 @click.option("--epochs", type=int, default=30, show_default=True, help="Number of epochs")
 @click.option("--lr", type=float, default=3e-4, show_default=True, help="Learning rate")
 @click.option("--weight-decay", type=float, default=1e-4, show_default=True, help="Weight decay")
-@click.option("--workers", type=int, default=4, show_default=True, help="DataLoader workers")
+@click.option("--workers", type=int, default=8, show_default=True, help="DataLoader workers")
 @click.option("--val-frac", type=float, default=0.1, show_default=True, help="Validation fraction")
 @click.option("--seed", type=int, default=1337, show_default=True, help="Random seed")
 @click.option("--huber-delta", type=float, default=1.0, show_default=True, help="Huber delta")

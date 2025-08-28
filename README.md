@@ -46,6 +46,32 @@ Verify CLI:
 osl --help
 ```
 
+## Apple Silicon (MPS) training tips
+
+These settings are applied automatically by OSL where possible, but you can verify and tune locally for best performance on Apple Silicon.
+
+- Verify MPS build/availability:
+  ```python
+  import torch
+  print("MPS is_built:", torch.backends.mps.is_built())
+  print("MPS is_available:", torch.backends.mps.is_available())
+  ```
+- Device + autocast:
+  - OSL prefers `mps` when built and available; otherwise falls back to CUDA/CPU.
+  - Mixed precision is enabled under-the-hood on MPS using `torch.autocast("mps", dtype=torch.float16)`, keeping master weights in fp32.
+- Explicit CPU fallbacks:
+  - OSL sets `PYTORCH_ENABLE_MPS_FALLBACK=1` when using MPS so unsupported ops fall back explicitly and are visible in logs.
+  - If you see frequent fallbacks, replace offending ops (e.g., unusual interpolation modes) with MPS-supported equivalents.
+- DataLoader tuning on MPS:
+  - Use more workers: `num_workers=8–12`.
+  - Enable `persistent_workers=True` and `prefetch_factor=4` (when `num_workers > 0`).
+  - Do not use pinned memory on MPS (`pin_memory=False`). OSL configures this automatically.
+- Image size while prototyping:
+  - Use smaller images like `--img-size 256–384` to 2–3× speed up iterations.
+- Faster JPEG decoding (optional):
+  - Install a libjpeg‑turbo–backed Pillow for faster decode: `pip install pillow-jpegturbo`.
+
+Note: The `osl train` command exposes `--img-size`, `--batch-size`, and `--workers` (default workers is 8). Adjust based on your hardware and dataset.
 
 ## Usage guide
 

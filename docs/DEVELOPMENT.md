@@ -137,3 +137,29 @@ Notes:
 - AFTER edits are sourced from sidecar XMPs; if the catalog contains edits but sidecars are missing, ingest will fall back to neutral AFTER XMP. Users should enable LR’s “Automatically write changes into XMP” before ingest for best results.
 - Tone curve support is pass-through; advanced parametric/point-curves will be added incrementally.
 - Region-aware masks are out-of-scope for v1 (see roadmap).
+## Apple Silicon (MPS) development tips
+
+These defaults are implemented in the training pipeline, but you can verify and tune locally for best performance on Apple Silicon.
+
+- Verify MPS build/availability:
+  ```python
+  import torch
+  print("MPS is_built:", torch.backends.mps.is_built())
+  print("MPS is_available:", torch.backends.mps.is_available())
+  ```
+- Device and mixed precision:
+  - The trainer prefers the "mps" device when both built and available, otherwise falls back to CUDA/CPU.
+  - Training and validation wrap forward/backward in autocast for MPS/CUDA using FP16 compute, while keeping master weights in FP32.
+- Explicit CPU fallbacks:
+  - The trainer sets the environment variable PYTORCH_ENABLE_MPS_FALLBACK=1 when using MPS so unsupported operations fall back explicitly (visible in logs).
+  - If you see frequent fallbacks in logs, replace the offending ops with MPS‑supported equivalents (e.g., prefer supported interpolation modes).
+- DataLoader tuning on MPS:
+  - Use more workers (recommend 8–12).
+  - Enable persistent_workers=True and prefetch_factor=4 (when num_workers > 0).
+  - Do not use pinned memory on MPS (pin_memory=False). This is configured automatically by the trainer.
+- Image size while prototyping:
+  - Use smaller images like --img-size 256–384 to speed up iterations by 2–3×.
+- Faster JPEG decoding (optional):
+  - Install a libjpeg‑turbo backed Pillow for faster JPEG decode: `pip install pillow-jpegturbo`.
+
+Note: The CLI exposes --img-size, --batch-size, and --workers (default workers is 8). Adjust based on your hardware and dataset.
